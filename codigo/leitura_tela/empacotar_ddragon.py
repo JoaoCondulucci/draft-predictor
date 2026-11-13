@@ -1,15 +1,8 @@
-"""empacotar_ddragon.py — junta as imagens do Data Dragon num único arquivo .npz.
-
-    python main.py ddragon
-
-Gera dados/ddragon/pacote.npz (alguns MB) com o ícone quadrado e a arte vertical de
-cada campeão já redimensionados. O reconhecedor carrega esse arquivo uma vez
-só, o que é bem mais rápido que abrir 350 imagens a cada execução.
-"""
+"""Junta ícones e artes do Data Dragon em pacote.npz, que carrega bem mais rápido que imagens soltas."""
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import json
 

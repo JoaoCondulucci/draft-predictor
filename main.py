@@ -1,9 +1,4 @@
-"""main.py — atalho para todos os comandos do projeto. Rode sempre da pasta draftanalyse/.
-
-    python main.py                      # lista os comandos
-    python main.py dados                # CSV do Oracle's Elixir -> recortes -> draft.db
-    python main.py aovivo --fp red --azul GEN --vermelho BLG --nova-serie
-"""
+"""Ponto de entrada do projeto: python main.py <comando>. Sem comando, lista as opções."""
 import runpy
 import sys
 from pathlib import Path
@@ -11,7 +6,6 @@ from pathlib import Path
 CODIGO = Path(__file__).resolve().parent / "codigo"
 
 COMANDOS = {
-    # nome: (scripts em ordem, descrição)
     "dados":      (["coleta/recortes.py", "coleta/load.py"], "recria os recortes e o draft.db a partir do CSV"),
     "recortes":   (["coleta/recortes.py"], "só os recortes (dados/csvs/)"),
     "load":       (["coleta/load.py"], "só o draft.db (a partir de dados/csvs/)"),

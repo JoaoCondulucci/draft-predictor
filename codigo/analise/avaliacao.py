@@ -1,16 +1,12 @@
-"""avaliacao.py — avaliação completa da previsão em todos os jogos do Worlds.
+"""Avalia a previsão em todas as ações de todos os jogos do Worlds.
 
-    python main.py avaliacao                 # gera resultados/acoes.csv e as tabelas de resumo
-    python main.py avaliacao --liga WLDs MSI # outras ligas
-
-Para cada ação de cada jogo (todos os times), o modelo é montado com os jogos até o dia
-anterior e anotamos em que POSIÇÃO do ranking o campeão real ficou (1 = acertou em cheio).
-Guardar a posição, e não só "acertou/errou", é o que permite achar padrões nos erros.
+Guarda a POSIÇÃO do campeão real no ranking, e não só acertou/errou: é o que permite
+achar padrões nos erros.
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import argparse
 import sqlite3

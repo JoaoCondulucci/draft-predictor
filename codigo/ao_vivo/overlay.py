@@ -1,11 +1,8 @@
-"""overlay.py — janela transparente por cima do vídeo, que desenha o estado do draft.
+"""Janela transparente por cima do vídeo que desenha o estado do draft e as previsões.
 
-- Sempre por cima, sem borda, o clique passa direto para o navegador (Windows).
-- Excluída das capturas de tela (SetWindowDisplayAffinity), para o leitor não ler os
-  próprios desenhos. Mesmo se isso falhar, nada é desenhado nas áreas de reconhecimento:
-  nomes ficam na parte de baixo dos cards e o painel fica em cima da torcida.
-
-Usado pelo draft_ao_vivo.py; não precisa rodar sozinho.
+Fica sempre por cima, sem borda e deixa o clique passar. É excluída das capturas de tela
+(SetWindowDisplayAffinity) para o leitor não ler os próprios desenhos; mesmo assim, nada é
+desenhado nas áreas de reconhecimento: nomes embaixo dos cards, painel em cima da torcida.
 """
 import ctypes
 import tkinter as tk
@@ -72,7 +69,6 @@ class Overlay:
         except AttributeError:
             pass   # não é Windows
 
-    # ---------------------------------------------------- desenho
 
     def _p(self, x, y):
         return x * self.sx, y * self.sy
@@ -98,7 +94,7 @@ class Overlay:
         self.root.after(self.intervalo, self.desenhar)
 
     def _desenhar(self, s):
-        # nomes dos picks já confirmados (parte de baixo do card: fora da área de leitura)
+        # nomes dos picks confirmados, embaixo do card
         for slot, nome in s["valores"].items():
             if "pick" not in slot or not nome:
                 continue
@@ -116,7 +112,6 @@ class Overlay:
         else:
             self._ret(x0 - 1, y0 - 1, x1 + 1, y1, outline=AMARELO, width=3)
 
-        # painel com as previsões, em cima da torcida, do lado do time da vez
         px0, py0, px1, py1 = PAINEL
         if s["passo"]["lado"] == "red":
             px0, px1 = LARGURA - px1, LARGURA - px0

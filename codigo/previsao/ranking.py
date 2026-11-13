@@ -16,22 +16,20 @@ MODELOS = DADOS / "modelos"
 
 
 def carregar(modelo, banco=BANCO):
-    """Liga o ranking ao modelo, se possível. Devolve True se ligou."""
+    """Liga o ranking ao modelo, se possível. Devolve None se ligou, ou o motivo de não ter ligado."""
     arq_meta = MODELOS / "ranking.json"
     if not arq_meta.exists():
-        print("[ranking] sem modelo treinado (python main.py ranking): usando só o modelo de contagem")
-        return False
+        return "sem modelo treinado: rode python main.py ranking"
     try:
         import lightgbm as lgb
     except ImportError:
-        print("[ranking] lightgbm não instalado (pip install lightgbm): usando só o modelo de contagem")
-        return False
+        return "lightgbm não instalado: rode pip install lightgbm"
     meta = json.loads(arq_meta.read_text(encoding="utf-8"))
     modelos = {tipo: lgb.Booster(model_file=str(MODELOS / f"ranking_{tipo}.txt")) for tipo in ("pick", "ban")}
     with sqlite3.connect(banco) as con:
         est = Estatisticas(con).ate(modelo.ate)
     modelo.ranking = Ranking(modelos, meta, est)
-    return True
+    return None
 
 
 class Ranking:

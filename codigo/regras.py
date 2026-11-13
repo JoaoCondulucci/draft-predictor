@@ -1,8 +1,6 @@
-
-
 ROTAS = ["top", "jng", "mid", "bot", "sup"]
 
-# Siglas para mostrar na tela (o banco usa o nome completo do Oracle's Elixir)
+# Nome no Oracle's Elixir -> sigla mostrada no overlay
 SIGLAS = {
     "Gen.G": "GEN", "Bilibili Gaming": "BLG", "Invictus Gaming": "IG", "T1": "T1",
     "Top Esports": "TES", "JD Gaming": "JDG", "Anyone's Legend": "AL", "Team WE": "WE",
@@ -15,8 +13,8 @@ SIGLAS = {
 def sigla(time):
     return SIGLAS.get(time, time)
 
-# Ordem do draft com a regra First Selection.
-# FP = time que tem o first pick, SP = o outro. Cada item: (fase, tipo, quem).
+# Ordem dos 20 passos do draft: (fase, tipo, quem).
+# FP = time com o first pick, SP = o outro.
 ORDEM_DRAFT = (
     [("ban1", "ban", q) for q in ["FP", "SP", "FP", "SP", "FP", "SP"]]
     + [("pick1", "pick", q) for q in ["FP", "SP", "SP", "FP", "FP", "SP"]]

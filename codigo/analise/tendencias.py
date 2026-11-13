@@ -1,20 +1,16 @@
-"""tendencias.py — tendências de draft de um torneio (padrão: Worlds), direto do draft.db.
+"""Tendências de draft de um torneio (padrão: Worlds), salvas em resultados/tend_*.csv.
 
-    python main.py tendencias            # gera resultados/tend_*.csv
-    python main.py tendencias --liga MSI
-
-Tabelas:
-  presenca     pick/ban de cada campeão (% dos jogos), winrate e em que fase é banido
-  duplas       campeões do mesmo time que aparecem juntos mais do que o acaso (lift)
-  rotas        que rota cada time pega no 1º, 2º... pick
-  first_pick   quando o time fica com o first pick e quanto vence com e sem ele
-  fearless     campeões que os times "gastam" no jogo 1 x guardam para depois
-  bans_time    o que cada time mais bane, separado por fase
+    presenca     pick/ban de cada campeão, winrate e em que fase é banido
+    duplas       campeões do mesmo time que aparecem juntos mais do que o acaso (lift)
+    rotas        que rota cada time pega no 1º, 2º... pick
+    first_pick   com que frequência o time tem o first pick e quanto vence com e sem ele
+    fearless     campeões "gastos" no jogo 1 x guardados para depois
+    bans_time    o que cada time mais bane, por fase
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import argparse
 import itertools

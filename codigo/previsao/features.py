@@ -3,15 +3,18 @@
 Para cada ação do draft, todo campeão disponível é um candidato com um vetor de features.
 Tudo é calculado com o Modelo montado só com jogos ANTES do dia do jogo (sem vazamento).
 """
+import itertools
 import math
 from collections import Counter, defaultdict
 
+import numpy as np
 import pandas as pd
 
 from previsao.modelo import Modelo, _normalizar
 from regras import ROTAS
 
 JANELA_RECENTE = 30   # dias para as taxas "recentes"
+DIM_EMBEDDING = 16    # tamanho do vetor de cada campeão (encaixe na composição)
 
 
 def _log(x):
@@ -48,8 +51,49 @@ class Estatisticas:
             "jog_rec": pr.groupby(["player", "champion"]).size().to_dict(),
             "time_bans": b.groupby(["team", "champion"]).size().to_dict(),
         }
+        e["time_par"], e["emb"] = self._composicoes(p)
         self._cache[ate] = e
         return e
+
+    @staticmethod
+    def _composicoes(p):
+        """Duplas por time e um vetor por campeão aprendido de quem aparece junto (PPMI + SVD)."""
+        time_par, par, n = Counter(), Counter(), Counter()
+        for (_, time), g in p.groupby(["game_id", "team"]):
+            campeoes = sorted(set(g["champion"]))
+            n.update(campeoes)
+            for a, b in itertools.combinations(campeoes, 2):
+                par[(a, b)] += 1
+                time_par[(time, a, b)] += 1
+        nomes = sorted(n)
+        idx = {c: i for i, c in enumerate(nomes)}
+        total = sum(n.values()) / 5 or 1
+        m = np.zeros((len(nomes), len(nomes)))
+        for (a, b), k in par.items():
+            pmi = math.log(k * total / (n[a] * n[b]))
+            if pmi > 0:
+                m[idx[a], idx[b]] = m[idx[b], idx[a]] = pmi
+        u, sv, _ = np.linalg.svd(m)
+        vet = u[:, :DIM_EMBEDDING] * np.sqrt(sv[:DIM_EMBEDDING])
+        vet /= np.linalg.norm(vet, axis=1, keepdims=True) + 1e-9
+        return time_par, {c: vet[i] for c, i in idx.items()}
+
+
+def encaixe(est, c, grupo):
+    """Cosseno entre o vetor do campeão e a média dos vetores do grupo (0 se não dá para medir)."""
+    vetores = [est["emb"][a] for a in grupo if a in est["emb"]]
+    if c not in est["emb"] or not vetores:
+        return 0.0
+    media = np.mean(vetores, axis=0)
+    return float(est["emb"][c] @ media / (np.linalg.norm(media) + 1e-9))
+
+
+def comp_do_time(est, time, c, grupo, n_jogos):
+    """Jogos em que ESTE time jogou c junto com cada campeão do grupo (soma e maior dupla)."""
+    contagens = [est["time_par"].get((time, *sorted((c, a))), 0) for a in grupo]
+    if not contagens:
+        return 0.0, 0.0
+    return sum(contagens) / n_jogos, max(contagens) / n_jogos
 
 
 def rotulo_rota(m, c):
@@ -88,7 +132,7 @@ def features_pick(m, est, time, adversario, ordem, picks_time, picks_adv, candid
         ameaca_adv = sum(m.pool.get(m.elenco.get((adversario, r)), Counter()).get(c, 0)
                          for r in livres_adv)
         linhas.append({
-            "campeao": c, "score_modelo": scores.get(c, 0), "log_score": _log(scores.get(c, 0)), "rank_modelo": rank[c],
+            "campeao": c, "score_modelo": scores.get(c, 0), "log_score": _log(scores.get(c, 0)), "rank_modelo": rank.get(c, len(candidatos)),
             "base_pool_rota": base, "log_base": _log(base),
             "pool_share": pool.get(c, 0) / total_pool, "jogos_jogador": math.log1p(m.jogos_jogador.get(jogador, Counter()).get(c, 0)),
             "jogos_jogador_rec": est["jog_rec"].get((jogador, c), 0),
@@ -99,6 +143,9 @@ def features_pick(m, est, time, adversario, ordem, picks_time, picks_adv, candid
             "log_duelo": _log(duelo), "tem_oponente": float(op is not None),
             "conforto_time": est["time_picks"].get((time, c), 0) / n_time,
             "ameaca_adv": ameaca_adv,
+            "comp_time": comp_do_time(est, time, c, picks_time, n_time)[0],
+            "comp_time_max": comp_do_time(est, time, c, picks_time, n_time)[1],
+            "encaixe": encaixe(est, c, picks_time), "encaixe_adv": encaixe(est, c, picks_adv),
             "time_bane_c": est["time_bans"].get((time, c), 0) / n_time,
             "adv_bane_c": est["time_bans"].get((adversario, c), 0) / max(est["time_jogos"].get(adversario, 1), 1),
             **extra,
@@ -137,7 +184,7 @@ def features_ban(m, est, time, adversario, ordem, picks_time, picks_adv, candida
             meu_pool = max(meu_pool, pool.get(c, 0) / tot)
         f_sin, _ = m.fator_sinergia(c, picks_adv)
         linhas.append({
-            "campeao": c, "score_modelo": scores.get(c, 0), "log_score": _log(scores.get(c, 0)), "rank_modelo": rank[c],
+            "campeao": c, "score_modelo": scores.get(c, 0), "log_score": _log(scores.get(c, 0)), "rank_modelo": rank.get(c, len(candidatos)),
             "ameaca": ameaca, "ameaca_rec": ameaca_rec, "ameaca_share": maior_share,
             "log_sinergia_adv": _log(f_sin),
             "hist_geral": hist.get(c, 0), "hist_fase": hist_fase.get(c, 0), "meta_ban": meta.get(c, 0),
@@ -145,6 +192,9 @@ def features_ban(m, est, time, adversario, ordem, picks_time, picks_adv, candida
             "conforto_adv": est["time_picks"].get((adversario, c), 0) / n_adv,
             "conforto_meu": est["time_picks"].get((time, c), 0) / n_time,
             "meu_pool_share": meu_pool, "flex": entropia, "certeza_rota": certeza,
+            "comp_adv": comp_do_time(est, adversario, c, picks_adv, n_adv)[0],
+            "comp_adv_max": comp_do_time(est, adversario, c, picks_adv, n_adv)[1],
+            "encaixe_adv": encaixe(est, c, picks_adv), "encaixe_meu": encaixe(est, c, picks_time),
             "fase": fase,
             **extra,
         })

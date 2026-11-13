@@ -1,15 +1,12 @@
-"""planilha.py — junta a avaliação e as tendências numa planilha para o Google Sheets.
+"""Junta a avaliação e as tendências em resultados/avaliacao_worlds.xlsx.
 
-    python main.py avaliacao && python main.py tendencias && python main.py planilha
-
-Gera resultados/avaliacao_worlds.xlsx. No Google Sheets: Arquivo > Importar > Fazer upload
-(todas as abas vêm juntas). As taxas de acerto são FÓRMULAS em cima da aba "Ações":
-se você corrigir ou filtrar dados ali, os resumos recalculam sozinhos.
+As taxas de acerto são fórmulas sobre a aba "Ações": corrigir ou filtrar dados ali
+atualiza os resumos.
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import sqlite3
 
@@ -46,8 +43,6 @@ COLUNAS_ACOES = [
     ("posicao_baseline", "Posição no 'mais popular'"), ("fearless_bloqueados", "Bloqueados Fearless"),
 ]
 
-
-# ------------------------------------------------------------ utilidades
 
 def cabecalho(ws, linha, textos, col=1):
     for i, t in enumerate(textos):
@@ -101,8 +96,6 @@ def taxas_formula(ws, linha, n_acoes, filtros, col=1):
 def col_letra(nome):
     return get_column_letter([c for c, _ in COLUNAS_ACOES].index(nome) + 1)
 
-
-# ------------------------------------------------------------ abas
 
 def aba_acoes(wb, acoes):
     ws = wb.create_sheet("Ações")

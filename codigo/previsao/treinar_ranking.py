@@ -1,18 +1,19 @@
-"""Treina o ranking aprendido (LightGBM) de picks e bans com os jogos do Worlds.
+"""Treina o ranking aprendido (LightGBM) de picks e bans (Worlds + GEN e BLG nas ligas deles).
 
     python main.py ranking
 
 1. Para cada ação de cada jogo, todos os campeões disponíveis viram candidatos com features
    calculadas só com jogos ANTERIORES ao dia do jogo (sem vazamento).
-2. Teste para frente: em cada bloco de datas, treina só com os blocos anteriores e compara
-   com o modelo de contagem nas mesmas ações. É o número honesto para divulgar.
+2. Teste para frente: em cada bloco de datas do fim do Worlds, treina só com jogos anteriores
+   (de qualquer liga) e compara com o modelo de contagem nas mesmas ações do Worlds.
+   É o número honesto para divulgar.
 3. Ajusta a temperatura do softmax para o % mostrado ficar perto da taxa real de acerto.
 4. Treina os modelos finais com todos os jogos e salva em dados/modelos/.
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # permite importar de codigo/
 
 import json
 import sqlite3
@@ -27,28 +28,35 @@ from previsao.features import Estatisticas, features_ban, features_pick
 from previsao.modelo import Modelo, estado_para_previsao
 from previsao.ranking import MODELOS
 
-LIGAS = ("WLDs",)
-NAO_FEATURES = {"campeao", "acao", "game_id", "data", "tipo", "alvo"}
+# Jogos com a ordem do draft no banco: Worlds + GEN e BLG nas ligas e torneios deles
+LIGAS = ("WLDs", "LPL", "LCK", "FST", "MSI", "EWC", "KeSPA Cup")
+INICIO = "2026-03-01"   # antes disso o modelo ainda tem pouco histórico do ano
+NAO_FEATURES = {"campeao", "acao", "game_id", "data", "tipo", "alvo", "liga"}
+# Nos bans, as features de composição pioraram o teste para frente: ficam de fora
+SO_PICKS = {"comp_adv", "comp_adv_max", "encaixe_adv", "encaixe_meu"}
 PARAMS = dict(objective="lambdarank", metric="ndcg", ndcg_eval_at=[1, 3, 5], learning_rate=0.05,
               num_leaves=15, min_data_in_leaf=40, feature_fraction=0.8, bagging_fraction=0.8,
               bagging_freq=1, lambda_l2=1.0, verbose=-1, seed=7)
 RODADAS = 300
-CORTES = (0.4, 0.55, 0.7, 0.85)   # blocos do teste para frente (fração acumulada das ações)
+CORTES = (0.4, 0.55, 0.7, 0.85)   # blocos do teste para frente (fração acumulada das ações do Worlds)
 
 
 def montar_base():
     con = sqlite3.connect(BANCO)
     est_todas = Estatisticas(con)
     marcas = ",".join("?" * len(LIGAS))
-    jogos = con.execute(f"""SELECT game_id, date_utc, blue_team, red_team FROM games
-                            WHERE league IN ({marcas}) ORDER BY date_utc""", LIGAS).fetchall()
-    modelos, linhas, n_acao = {}, [], 0
-    for game_id, data, azul, verm in jogos:
+    jogos = con.execute(f"""SELECT game_id, date_utc, blue_team, red_team, league FROM games
+                            WHERE league IN ({marcas}) AND date_utc >= ? ORDER BY date_utc""",
+                        (*LIGAS, INICIO)).fetchall()
+    tabelas, n_acao, dia, m, est = [], 0, None, None, None
+    for game_id, data, azul, verm, liga in jogos:
         ate = data[:10] + " 00:00:00"
-        if ate not in modelos:
+        if ate != dia:   # jogos em ordem de data: só o modelo do dia fica na memória
             print(f"  modelo até {ate[:10]}...")
-            modelos[ate] = Modelo(ate=ate)
-        m, est = modelos[ate], est_todas.ate(ate)
+            dia, m = ate, Modelo(ate=ate)
+            est_todas._cache.clear()
+            est = est_todas.ate(ate)
+        linhas = []
         time_por_lado = {"blue": azul, "red": verm}
         lado_por_time = {azul: "blue", verm: "red"}
         fearless = [c for (c,) in con.execute(
@@ -65,13 +73,18 @@ def montar_base():
                     f = features_pick if tipo == "pick" else features_ban
                     for linha in f(m, est, e["time"], e["adversario"], ordem, e["picks_time"],
                                    e["picks_adv"], candidatos, {"ordem": ordem}):
-                        linha.update(acao=n_acao, game_id=game_id, data=data[:10], tipo=tipo,
+                        linha.update(acao=n_acao, game_id=game_id, data=data[:10], tipo=tipo, liga=liga,
                                      alvo=int(linha["campeao"] == real))
                         linhas.append(linha)
                     n_acao += 1
             feitos.append((lado, tipo, real))
+        if linhas:
+            tabela = pd.DataFrame(linhas)
+            numericas = tabela.select_dtypes("number").columns.drop(["acao", "alvo"])
+            tabela[numericas] = tabela[numericas].astype("float32")
+            tabelas.append(tabela)
     con.close()
-    return pd.DataFrame(linhas)
+    return pd.concat(tabelas, ignore_index=True)
 
 
 def treinar(df, feats):
@@ -104,15 +117,18 @@ def main():
     base = montar_base()
     MODELOS.mkdir(parents=True, exist_ok=True)
     meta = {"features": {}, "temperatura": {}, "teste_para_frente": {}}
-    acumulado = base[base.alvo == 1].groupby("data").size().cumsum() / (base.alvo == 1).sum()
+    reais = base[(base.alvo == 1) & (base.liga == "WLDs")]
+    acumulado = reais.groupby("data").size().cumsum() / len(reais)
     cortes = [acumulado[acumulado >= q].index[0] for q in CORTES] + ["9999"]
     for tipo in ("pick", "ban"):
         df = base[base.tipo == tipo].reset_index(drop=True)
-        feats = [c for c in df.columns if c not in NAO_FEATURES and df[c].notna().any()]
+        feats = [c for c in df.columns if c not in NAO_FEATURES and df[c].notna().any()
+                 and not (tipo == "ban" and c in SO_PICKS)]
         df[feats] = df[feats].fillna(0)
         df["p"] = np.nan
         for ini, fim in zip(cortes[:-1], cortes[1:]):
-            tr, te = df[df.data < ini], df[(df.data >= ini) & (df.data < fim)]
+            tr = df[df.data < ini]
+            te = df[(df.liga == "WLDs") & (df.data >= ini) & (df.data < fim)]
             df.loc[te.index, "p"] = treinar(tr, feats).predict(te[feats])
         teste = df[df.p.notna()].copy()
         teste["atual"] = -teste.rank_modelo

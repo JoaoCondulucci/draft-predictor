@@ -1,16 +1,12 @@
-"""backtest.py — mede o quanto a previsão acerta em jogos que já aconteceram.
+"""Mede o acerto da previsão nos jogos da GEN e da BLG (outras ligas com --liga).
 
-    python main.py backtest                   # jogos da GEN e da BLG no Worlds
-    python main.py backtest --liga LCK LPL    # outras ligas
-
-Para cada jogo, o modelo é montado SÓ com jogos anteriores a ele (sem "espiar o futuro").
-Em cada ação do time (pick ou ban), anotamos em que posição do ranking o campeão real ficou.
-Comparamos com um baseline burro: "o campeão mais popular ainda disponível".
+O modelo de cada jogo usa só jogos anteriores a ele, e o resultado é comparado com um
+baseline: o campeão mais popular ainda disponível.
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import argparse
 import sqlite3

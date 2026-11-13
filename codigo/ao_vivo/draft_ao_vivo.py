@@ -1,32 +1,22 @@
-"""draft_ao_vivo.py — acompanha o draft lendo a tela.
+"""Acompanha o draft lendo a tela, prevê a próxima ação e desenha o overlay.
 
-Replay (testar com frames salvos pelo capturar.py):
-    python main.py aovivo --replay dados/tela/frames --fp red --jogo LOLTMNT02_487213
-    python main.py aovivo --replay dados/tela/frames --fp red --jogo LOLTMNT02_487213 --pular 12:16:08-12:17:23
-
-    (com --azul/--vermelho também mostra e avalia as previsões)
-
-Ao vivo (lê a área calibrada da tela ~3x por segundo e desenha o overlay):
-    python main.py aovivo --fp blue --azul GEN --vermelho BLG --nova-serie   # jogo 1
+    python main.py aovivo --fp blue --azul GEN --vermelho BLG --nova-serie   # jogo 1 da série
     python main.py aovivo --fp red  --azul BLG --vermelho GEN                # jogos seguintes
+    python main.py aovivo --replay dados/tela/frames --fp red --jogo <game_id>  # teste com frames
 
---fp diz qual LADO tem o first pick neste jogo (aparece "1ST PICK" embaixo do logo).
---nova-serie zera os campeões do Fearless (use no jogo 1). Nos jogos seguintes, os picks
-dos jogos anteriores vêm do serie_atual.json, que é salvo no fim de cada draft.
-Comandos no terminal durante o modo ao vivo:
-    fix <slot> <campeão>   ex.: fix red_pick2 Kled      (corrige uma leitura)
-    passo <N>              força o passo atual
-    estado                 mostra o draft até agora
-    sair
+--fp é o LADO com o first pick. --nova-serie zera o Fearless; nos jogos seguintes, os picks
+anteriores vêm de dados/serie_atual.json.
+Comandos no terminal: fix <slot> <campeão> | passo <N> | estado | sair
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import argparse
 import json
 import sqlite3
+import textwrap
 import threading
 import time
 from datetime import datetime
@@ -55,10 +45,10 @@ class Previsor:
     def __init__(self, time_por_lado, ate=None):
         from previsao import ranking
         from previsao.modelo import Modelo
-        self.modelo = Modelo(ate=ate)    # ate: só jogos anteriores (replay honesto)
-        if ranking.carregar(self.modelo):
-            print("[ranking] ranking aprendido ligado" + (
-                " (treinado com o Worlds inteiro: o acerto deste replay fica otimista)" if ate else ""))
+        self.modelo = Modelo(ate=ate)  # só jogos anteriores (replay honesto)
+        problema = ranking.carregar(self.modelo)
+        self.descricao = ("modelo de contagem + ranking aprendido" if problema is None
+                          else f"só o modelo de contagem ({problema})")
         self.time_por_lado = time_por_lado
 
     def prever(self, estado):
@@ -77,7 +67,7 @@ class EstadoDraft:
         self.fearless = set(fearless)
         self.previsor = previsor
         self.previsao = []         # top 5 do passo atual: [(campeão, prob, motivo)]
-        self.previsao_do_passo = {}  # passo -> top 5 mostrado quando ele estava em andamento
+        self.previsao_do_passo = {}
         self.trava = threading.Lock()
         self.passos = []
         contagem = {}
@@ -89,20 +79,19 @@ class EstadoDraft:
         self.valor = {}            # slot -> campeão confirmado (None = passo sem leitura confiável)
         self.atual = 1             # passo em andamento (21 = draft terminou)
         self.inicio_passo = None
-        self.timer_anterior = None # cor da barra no passo atual
-        self.frac_min = 1.0        # menor comprimento da barra visto no passo atual
-        self._sinais = 0           # frames seguidos indicando passo novo
-        self._cianos = 0           # frames seguidos com a barra ciano
+        self.timer_anterior = None
+        self.frac_min = 1.0
+        self._sinais = 0
+        self._cianos = 0
         self.congelado = False     # fim do draft à vista: picks não são mais relidos
         self.provisorios = set()   # picks lidos no aperto do fim: conferidos depois da troca
-        self.fim_em = None         # quando a fase de trocas começou
-        self._proximo_reler = 0    # rodízio de releitura dos picks já confirmados
+        self.fim_em = None
+        self._proximo_reler = 0
         self.trocas = False        # fase de trocas (barra ciano): picks não mudam mais
         self.hover = None          # leitura provisória do passo atual
-        self._candidato = {}       # slot -> (campeão, quantas leituras seguidas)
+        self._candidato = {}
         self.log = []
 
-    # -------------------------------------------------------- consultas
 
     def passo(self, n):
         return self.passos[n - 1]
@@ -110,12 +99,33 @@ class EstadoDraft:
     def usados(self, exceto=None):
         return {v for s, v in self.valor.items() if v and s != exceto} | self.fearless
 
-    def evento(self, t, msg):
-        linha = f"[{datetime.fromtimestamp(t).strftime('%H:%M:%S')}] {msg}"
-        self.log.append(linha)
-        print(linha)
+    def evento(self, t, msg, detalhe=""):
+        hora = datetime.fromtimestamp(t).strftime("%H:%M:%S")
+        self.log.append(f"{hora}   {msg}" + (f"  [{detalhe}]" if detalhe else ""))
+        print(f"{hora}   {msg}")
 
-    # -------------------------------------------------------- mudanças de estado
+    def quem(self, p):
+        """Sigla do time que faz o passo (ou o lado, se os times não foram informados)."""
+        if self.previsor:
+            return sigla(self.previsor.time_por_lado[p["lado"]])
+        return "azul" if p["lado"] == "blue" else "verm."
+
+    def rotulo(self, p):
+        return f"{self.quem(p):<5} {p['tipo']:<4} {p['n']}"
+
+    def posicao_txt(self, p):
+        """Onde o campeão escolhido estava na previsão daquele passo."""
+        top, valor = self.previsao_do_passo.get(p["step"]), self.valor.get(p["slot"])
+        if top is None or not valor:
+            return ""
+        return f"{top.index(valor) + 1}º da previsão" if valor in top else "fora do top 5"
+
+    def linha_passo(self, p, obs=""):
+        valor = self.valor.get(p["slot"])
+        if not valor:
+            return f"{self.rotulo(p)}   {'??':<14}sem leitura confiável · use: fix {p['slot']} <campeão>"
+        return f"{self.rotulo(p)}   {valor:<14}{self.posicao_txt(p)}" + (f"  ({obs})" if obs else "")
+
 
     def _ler(self, frame, slot):
         return self.rec.ler_slot(frame, slot, frozenset(self.usados(exceto=slot)))
@@ -123,24 +133,17 @@ class EstadoDraft:
     def confirmar_atual(self, frame, t, motivo, preferir_hover=False):
         p = self.passo(self.atual)
         if preferir_hover and self.hover and self.hover.ok:
-            # Na fase de trocas os cards já podem ter mudado de dono: vale a última leitura
-            # feita ANTES da barra ficar ciano.
+            # Na fase de trocas os cards podem já ter mudado de dono: vale o hover lido antes do ciano
             self.valor[p["slot"]] = self.hover.nome
         else:
             leitura = self._ler(frame, p["slot"])
             self.valor[p["slot"]] = leitura.nome if leitura.ok else None
             if not leitura.ok and self.hover and self.hover.ok:
-                self.valor[p["slot"]] = self.hover.nome     # o hover confiável é melhor que nada
-        txt = self.valor[p["slot"]] or "?? (sem leitura confiável, use fix)"
+                self.valor[p["slot"]] = self.hover.nome
         if self.previsor and self.previsao:
-            # Guarda o top 5 que estava na tela; a conta de acerto é feita no fim, com o valor
-            # final do passo (inclui passos que começaram com ?? e foram corrigidos depois)
+            # O acerto é calculado no fim, com o valor final do passo (inclui correções)
             self.previsao_do_passo[p["step"]] = [c for c, _, _ in self.previsao]
-            if self.valor[p["slot"]]:
-                top = self.previsao_do_passo[p["step"]]
-                pos = top.index(self.valor[p["slot"]]) + 1 if self.valor[p["slot"]] in top else None
-                txt += f"   (previsão: {'top ' + str(pos) if pos else 'fora do top 5'})"
-        self.evento(t, f"passo {p['step']:2d} {p['lado']:4} {p['tipo']:4} {p['n']}: {txt}  [{motivo}]")
+        self.evento(t, self.linha_passo(p), detalhe=f"passo {p['step']}, {motivo}")
         self.atual += 1
         self.inicio_passo = t
         self.hover = None
@@ -152,9 +155,8 @@ class EstadoDraft:
             return
         self.previsao = self.previsor.prever(self)
         p = self.passo(self.atual)
-        resumo = ", ".join(f"{c} {prob:.0%}" for c, prob, _ in self.previsao)
-        quem = sigla(self.previsor.time_por_lado[p["lado"]])
-        print(f"           agora: {quem} {p['tipo']} {p['n']} -> {resumo}")
+        resumo = " · ".join(f"{c} {prob:.0%}" for c, prob, _ in self.previsao)
+        print(f"{'próximo':<8}   {self.rotulo(p)}   {resumo}")
 
     def fix(self, slot, nome):
         """Correção manual pelo terminal. Aceita o nome em minúsculas ('kled', 'ksante')."""
@@ -207,7 +209,8 @@ class EstadoDraft:
             if vezes >= (2 if atual is None else 3):
                 self.valor[slot] = leitura.nome
                 self._candidato.pop(slot)
-                self.evento(t, f"correção passo {p['step']:2d} ({slot}): {atual} -> {leitura.nome}")
+                obs = "corrigido" if atual is None else f"corrigido, era {atual}"
+                self.evento(t, self.linha_passo(p, obs), detalhe=f"passo {p['step']}, releitura")
                 self.atualizar_previsao()
 
     def atualizar(self, frame, t):
@@ -221,11 +224,8 @@ class EstadoDraft:
         return not pendente or (self.fim_em is not None and t - self.fim_em > espera)
 
     def resolver_por_composicao(self, frame, t):
-        """Depois da troca de cards, cada time mostra seus 5 campeões (agora na ordem das rotas).
-
-        Se um pick do time está sem leitura ou foi lido no aperto do fim (provisório), o campeão
-        que sobra nos 5 cards, tirando os outros 4 picks conhecidos, é ele. Não depende de
-        pegar o frame certo antes da troca.
+        """Depois da troca de cards, o pick duvidoso de um time é o campeão que sobra nos 5 cards
+        tirando os outros 4 picks conhecidos.
         """
         for lado in ("blue", "red"):
             passos_pick = [p for p in self.passos if p["lado"] == lado and p["tipo"] == "pick"]
@@ -247,8 +247,8 @@ class EstadoDraft:
                 self.valor[alvo["slot"]] = nome
                 self.provisorios.discard(alvo["slot"])
                 if nome != antes:
-                    self.evento(t, f"pelos 5 cards depois da troca, passo {alvo['step']}: "
-                                   f"{antes} -> {nome}")
+                    obs = "pelos 5 cards" + (f", era {antes}" if antes else "")
+                    self.evento(t, self.linha_passo(alvo, obs), detalhe=f"passo {alvo['step']}")
 
     def _atualizar(self, frame, t):
         if self.trocas:
@@ -260,13 +260,11 @@ class EstadoDraft:
             self.atualizar_previsao()
         cor, frac = self.rec.ler_timer(frame)
 
-        # Fase de trocas: barra ciano por 3 frames seguidos E o card do ÚLTIMO pick (passo 20)
-        # já tem campeão. A barra também fica ciano em transições de fase no meio do draft
-        # (visto no jogo 2, logo depois do passo 11) — isso não pode encerrar o draft.
+        # Fim do draft: 3 frames ciano seguidos e o último pick feito. A barra também fica
+        # ciano em transições de fase no meio do draft, o que não pode encerrá-lo.
         self._cianos = self._cianos + 1 if cor == "cyan" else 0
-        # Congelamento: no fim do draft, ao PRIMEIRO frame ciano os times já podem começar a
-        # trocar campeões de card. A partir daí não relemos picks nem atualizamos o hover
-        # (no teste do jogo 2 a Gwen "virou" o pick 1 da GEN por causa disso).
+        # Ao primeiro frame ciano os times podem começar a trocar campeões de card:
+        # a partir daí não relemos picks nem atualizamos o hover.
         if cor == "cyan" and self.atual >= 17:
             self.congelado = True
         elif cor in ("red", "blue"):
@@ -292,19 +290,17 @@ class EstadoDraft:
                     leitura = self._ler(frame, p["slot"])
                     if leitura.ok:
                         self.valor[p["slot"]] = leitura.nome
-                        self.evento(t, f"leitura final passo {p['step']:2d} ({p['slot']}): {leitura.nome}")
+                        self.evento(t, self.linha_passo(p, "leitura final"), detalhe=f"passo {p['step']}")
             self.trocas = True
-            self.evento(t, "fim do draft (fase de trocas)")
+            self.evento(t, "fim do draft")
 
         if self.atual <= 20 and cor in ("red", "blue"):
             if self.inicio_passo is None:
                 self.inicio_passo = t
             if self.timer_anterior is None:
                 self.timer_anterior, self.frac_min = cor, frac
-            # Passo novo = a cor mudou OU a barra voltou a encher. Só vale se aparecer
-            # em 2 frames seguidos (um frame isolado pode ser ruído do vídeo).
-            # Logo depois de um passo novo a barra "cresce" até encher (animação):
-            # durante GRACA_RESET segundos isso não conta como outro reset.
+            # Passo novo = a cor mudou ou a barra voltou a encher, em 2 frames seguidos (contra ruído).
+            # Logo após um passo, a animação de encher a barra não conta (GRACA_RESET).
             em_graca = t - self.inicio_passo < GRACA_RESET
             mudou = cor != self.timer_anterior or (not em_graca and frac - self.frac_min > SALTO_RESET)
             if mudou:
@@ -316,8 +312,7 @@ class EstadoDraft:
             if self._sinais >= 2 and t - self.inicio_passo >= MIN_DURACAO_PASSO:
                 self.confirmar_atual(frame, t, "timer")
                 self.timer_anterior, self.frac_min, self._sinais = cor, 1.0, 0
-            # A barra é do outro time, mas o slot do passo atual já tem campeão:
-            # o passo terminou e não vimos (passo muito rápido ou começamos no meio)
+            # A barra é do outro time e o slot atual já tem campeão: o passo acabou sem vermos.
             elif (self._sinais == 0 and cor != self.passo(self.atual)["lado"]
                   and self._ler(frame, self.passo(self.atual)["slot"]).ok):
                 self.confirmar_atual(frame, t, "ressincronizado")
@@ -334,20 +329,20 @@ class EstadoDraft:
         if not self.congelado:
             self._corrigir(frame, t)
 
-    # -------------------------------------------------------- saída
 
     def resumo(self):
         linhas = []
         for p in self.passos:
-            v = self.valor.get(p["slot"], "-") if p["step"] < self.atual else "(pendente)"
-            linhas.append(f"{p['step']:2d} {p['lado']:4} {p['tipo']:4} {p['n']}  {v}")
+            if p["step"] < self.atual:
+                v = f"{self.valor.get(p['slot']) or '??':<14}{self.posicao_txt(p)}"
+            else:
+                v = "(pendente)"
+            linhas.append(f"{p['step']:4d}   {self.rotulo(p)}   {v}")
         return "\n".join(linhas)
 
     def picks(self):
         return [self.valor.get(p["slot"]) for p in self.passos if p["tipo"] == "pick"]
 
-
-# ------------------------------------------------------------ replay
 
 def tempo_do_arquivo(caminho):
     return datetime.strptime(caminho.stem[:19], "%Y%m%d_%H%M%S_%f").timestamp()
@@ -374,11 +369,27 @@ def criar_previsor(args):
     if not (args.azul and args.vermelho):
         return None
     ate = None
-    if args.replay and args.jogo:      # no replay, o modelo não pode conhecer o próprio jogo
+    if args.jogo:      # o modelo só usa jogos anteriores a este (teste honesto com VOD ou replay)
         with sqlite3.connect(BANCO) as con:
             linha = con.execute("SELECT date_utc FROM games WHERE game_id = ?", (args.jogo,)).fetchone()
             ate = linha[0] if linha else None
     return Previsor({"blue": nome_time(args.azul), "red": nome_time(args.vermelho)}, ate=ate)
+
+
+def cabecalho(estado, fp_lado, fearless):
+    """Primeiras linhas do terminal: confronto, modelo usado e campeões bloqueados."""
+    print("-" * 78)
+    if estado.previsor:
+        times = {lado: sigla(t) for lado, t in estado.previsor.time_por_lado.items()}
+        print(f" {times['blue']} (azul) x {times['red']} (vermelho) · first pick: {times[fp_lado]}")
+        if estado.previsor.modelo.ranking is None:     # só avisa quando o ranking não ligou
+            print(f" Previsão: {estado.previsor.descricao}")
+    else:
+        print(" Sem times informados (--azul e --vermelho): só a leitura do draft, sem previsão")
+    bloqueados = f"{len(fearless)} campeões bloqueados" if fearless else "nenhum campeão bloqueado"
+    print(textwrap.fill(f"Fearless: {bloqueados}" + (f" ({', '.join(fearless)})" if fearless else ""),
+                        width=78, initial_indent=" ", subsequent_indent="   "))
+    print("-" * 78)
 
 
 def resumo_previsao(estado):
@@ -393,16 +404,18 @@ def resumo_previsao(estado):
     todas = posicoes["pick"] + posicoes["ban"]
     if not todas:
         return
+    print("\nAcerto da previsão (o campeão escolhido estava entre os primeiros da lista)")
     for nome, lista in (("picks", posicoes["pick"]), ("bans", posicoes["ban"]), ("total", todas)):
         if lista:
-            partes = [f"top {k}: {sum(1 for x in lista if x and x <= k)}/{len(lista)}" for k in (1, 3, 5)]
-            print(f"previsão {nome:6} " + "  ".join(partes))
+            partes = [f"top {k}: {sum(1 for x in lista if x and x <= k):2d}/{len(lista)}" for k in (1, 3, 5)]
+            print(f"  {nome:6} " + "   ".join(partes))
 
 
 def replay(args):
     rec = Reconhecedor()
     fearless = carregar_fearless(args) if args.fearless_de else []
     estado = EstadoDraft(rec, args.fp, fearless, previsor=criar_previsor(args))
+    cabecalho(estado, args.fp, fearless)
     arquivos = sorted(Path(args.replay).glob("*.png"))
     if args.pular:
         ini, fim = args.pular.split("-")
@@ -415,14 +428,12 @@ def replay(args):
         if frame.shape[:2] != (ALTURA, LARGURA):
             frame = cv2.resize(frame, (LARGURA, ALTURA))
         estado.atualizar(frame, tempo_do_arquivo(a))
-    print(f"\n({time.time() - inicio:.1f} s para processar)")
+    print(f"\n({time.time() - inicio:.1f} s para processar)\n\nDraft lido")
     print(estado.resumo())
     if args.jogo:
         comparar_com_banco(estado, args.jogo)
     resumo_previsao(estado)
 
-
-# ------------------------------------------------------------ série (Fearless)
 
 def carregar_fearless(args):
     if args.fearless_de:      # teste com VOD: pega do banco os picks dos jogos anteriores da série
@@ -440,8 +451,6 @@ def salvar_fearless(picks_anteriores, estado):
                                     indent=2), encoding="utf-8")
     print(f"Fearless: {len(picks_anteriores) + len(novos)} campeões bloqueados para o próximo jogo")
 
-
-# ------------------------------------------------------------ ao vivo
 
 def ler_comandos(estado, parar):
     for linha in sys.stdin:
@@ -483,7 +492,7 @@ def ao_vivo(args):
     rec = Reconhecedor()
     fearless = carregar_fearless(args)
     estado = EstadoDraft(rec, args.fp, fearless, previsor=criar_previsor(args))
-    print(f"Fearless bloqueados: {', '.join(fearless) or 'nenhum'}")
+    cabecalho(estado, args.fp, fearless)
     parar = threading.Event()
     threading.Thread(target=ler_comandos, args=(estado, parar), daemon=True).start()
 
@@ -495,13 +504,14 @@ def ao_vivo(args):
 
         def captura_e_fecha():
             loop_captura(estado, calib, parar)
-            time.sleep(15)            # deixa o resultado na tela uns segundos
+            time.sleep(15)
             ov.fechar()
 
         threading.Thread(target=captura_e_fecha, daemon=True).start()
         ov.rodar()                    # o tkinter precisa rodar na thread principal
         parar.set()
 
+    print("\nDraft lido")
     print(estado.resumo())
     resumo_previsao(estado)
     salvar_fearless(fearless, estado)
@@ -520,7 +530,8 @@ def main():
     ap.add_argument("--fp", choices=["blue", "red"], required=True,
                     help="lado que tem o first pick neste jogo")
     ap.add_argument("--replay", help="pasta com frames salvos (modo de teste)")
-    ap.add_argument("--jogo", help="game_id do draft.db para comparar no replay")
+    ap.add_argument("--jogo", help="game_id do draft.db: o modelo só usa jogos anteriores a ele "
+                                    "(e, no replay, compara com o draft real)")
     ap.add_argument("--nova-serie", action="store_true", help="ignora o serie_atual.json")
     ap.add_argument("--pular", help="replay: ignora um trecho, ex.: 12:16:08-12:17:23")
     ap.add_argument("--azul", help="time do lado azul (ex.: GEN, BLG ou o nome do banco)")

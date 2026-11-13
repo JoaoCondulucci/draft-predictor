@@ -1,15 +1,11 @@
-"""capturar.py — salva 1 frame por segundo do vídeo calibrado em dados/tela/frames/.
+"""Salva frames da área calibrada em dados/tela/frames/, para testar o reconhecimento.
 
-Use enquanto assiste ao draft de um VOD (semifinal) para montar o conjunto
-de teste do reconhecimento. Ctrl+C para parar.
-
-    python main.py capturar            # 1 frame/s
-    python main.py capturar 0.5        # 1 frame a cada 0,5 s
+    python main.py capturar 0.5   # um frame a cada 0,5 s (padrão: 1 s). Ctrl+C para parar.
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import json
 import time

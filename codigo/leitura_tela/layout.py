@@ -1,25 +1,20 @@
-"""layout.py — onde fica cada slot do draft na transmissão do Worlds 2026.
+"""Posição de cada slot do draft na transmissão do Worlds 2026.
 
-Todas as coordenadas estão num quadro PADRÃO de 1280x720. O vídeo capturado
-é sempre redimensionado para esse tamanho antes de recortar os slots, então
-tanto faz assistir em modo teatro, tela cheia ou outro monitor.
-
-Medido a partir de um print do VOD GEN x IG (semifinal).
+As coordenadas estão num quadro padrão de 1280x720: todo frame capturado é redimensionado
+para esse tamanho antes de recortar os slots.
 """
 
 LARGURA, ALTURA = 1280, 720
 
-# Faixa dos bans (ícones quadrados)
 BAN_Y0, BAN_Y1 = 472, 519
 BAN_W = 48
 
-# Cards de pick (arte vertical). Só a parte de cima é usada para reconhecer o
-# campeão, porque embaixo ficam o nome do jogador e o ícone da rota.
+# Cards de pick: só a parte de cima reconhece o campeão (embaixo ficam o jogador e a rota)
 CARD_Y0, CARD_Y1 = 527, 720
 CARD_W = 1280 / 12          # 5 cards azuis + bloco central (2 cards) + 5 vermelhos
-CARD_TOPO = 0.6             # fração do card usada no reconhecimento
+CARD_TOPO = 0.6
 
-# Barra do timer: a cor indica qual time está escolhendo
+# A cor da barra do timer indica qual time está escolhendo
 TIMER = (460, 520, 820, 527)
 
 
@@ -28,12 +23,10 @@ def _ret(x0, y0, x1, y1):
 
 
 def slots():
-    """Retorna {nome: (x0, y0, x1, y1)} para os 20 slots.
+    """{nome: (x0, y0, x1, y1)} dos 20 slots, ex.: blue_ban1, red_pick5.
 
-    Nomes: blue_ban1..5, red_ban1..5, blue_pick1..5, red_pick1..5.
-    O número é a ordem DENTRO DO TIME (igual a ban1..5 / pick1..5 do Oracle's Elixir).
-    - Bans azuis enchem da esquerda para o centro; bans vermelhos, da direita para o centro.
-    - Picks dos dois lados enchem da esquerda para a direita (ordem top -> sup dos jogadores).
+    O número é a ordem dentro do time (ban1..5 / pick1..5 do Oracle's Elixir). Os bans
+    enchem das pontas para o centro; os picks, da esquerda para a direita.
     """
     s = {}
     for i in range(5):

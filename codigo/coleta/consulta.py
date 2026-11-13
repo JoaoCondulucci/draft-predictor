@@ -1,19 +1,17 @@
-"""consulta.py — roda uma consulta SQL no draft.db e mostra como tabela.
+"""Roda um SQL (texto ou arquivo .sql) no draft.db e mostra o resultado como tabela.
 
-    python main.py consulta "SELECT * FROM v_player_pool WHERE player = 'Chovy' ORDER BY games DESC"
-    python main.py consulta minha_consulta.sql      # também aceita um arquivo .sql
+    python main.py consulta "SELECT * FROM v_player_pool WHERE player = 'Chovy'"
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import sqlite3
 
 import pandas as pd
 
 from caminhos import BANCO
-
 
 
 def main():

@@ -1,12 +1,8 @@
-"""load.py — carrega os recortes do Oracle's Elixir no SQLite (draft.db).
-
-Rodar:  python main.py load
-Recria o banco do zero a cada execução (pode rodar quantas vezes quiser).
-"""
+"""Carrega os recortes do Oracle's Elixir no draft.db (recria o banco do zero a cada execução)."""
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import sqlite3
 
@@ -20,12 +16,8 @@ ARQUIVOS = [CSVS / "gen_blg.csv", CSVS / "worlds_todos.csv"]
 ROLES = set(ROTAS)
 
 
-
-# ---------------------------------------------------------------- leitura
-
 def ler_csvs():
-    """Junta os recortes. Jogos da GEN/BLG no Worlds aparecem nos dois arquivos,
-    então removemos as linhas repetidas."""
+    """Junta os recortes, sem repetir jogos que aparecem em mais de um arquivo."""
     partes = [pd.read_csv(a, dtype={"patch": str}, low_memory=False) for a in ARQUIVOS]
     df = pd.concat(partes, ignore_index=True)
     return df.drop_duplicates(subset=["gameid", "teamname", "position"])
@@ -36,10 +28,8 @@ def texto_ou_none(valor):
     return None if pd.isna(valor) else str(valor)
 
 
-# ---------------------------------------------------------------- games
-
 def montar_jogos(df):
-    """Usa as 2 linhas de time de cada jogo (position == 'team')."""
+    """Um registro por jogo, a partir das 2 linhas de time (position == 'team')."""
     linhas_time = df[df["position"] == "team"]
     jogos = []
     for game_id, linhas in linhas_time.groupby("gameid"):
@@ -75,8 +65,6 @@ def montar_jogos(df):
     return jogos, linhas_time
 
 
-# ---------------------------------------------------------------- séries
-
 def montar_series(jogos):
     """Percorre os jogos em ordem de data. Para cada confronto (liga + par de times),
     game == 1 abre uma série nova; os jogos seguintes entram na série aberta."""
@@ -102,8 +90,6 @@ def montar_series(jogos):
     return jogos
 
 
-# ---------------------------------------------------------------- draft
-
 def montar_draft(jogos, linhas_time):
     """Transforma ban1..5 / pick1..5 de cada time na sequência global de 20 passos."""
     por_time = linhas_time.set_index(["gameid", "teamname"])
@@ -111,7 +97,7 @@ def montar_draft(jogos, linhas_time):
     for j in jogos:
         segundo = j["red_team"] if j["first_pick_team"] == j["blue_team"] else j["blue_team"]
         quem = {"FP": j["first_pick_team"], "SP": segundo}
-        usados = {}  # (time, tipo) -> quantos bans/picks desse time já colocamos
+        usados = {}
         for step, (fase, tipo, q) in enumerate(ORDEM_DRAFT, start=1):
             time = quem[q]
             n = usados.get((time, tipo), 0) + 1
@@ -121,8 +107,6 @@ def montar_draft(jogos, linhas_time):
     return acoes
 
 
-# ---------------------------------------------------------------- jogadores
-
 def montar_jogadores(df, ids_validos):
     linhas = df[df["position"].isin(ROLES) & df["gameid"].isin(ids_validos)]
     return [
@@ -131,8 +115,6 @@ def montar_jogadores(df, ids_validos):
         for r in linhas.itertuples()
     ]
 
-
-# ---------------------------------------------------------------- conferência
 
 def conferir(con):
     """Checagens que pegam bug de carga. As duas contagens devem dar 0."""
@@ -152,8 +134,6 @@ def conferir(con):
     print(f"picks do draft sem jogador correspondente: {picks_sem_jogador}")
     print(f"picks que repetem campeão já usado na série (Fearless): {repetidos_fearless}")
 
-
-# ---------------------------------------------------------------- todos os jogos (sinergias)
 
 def carregar_todos_picks(con):
     """Picks de todos os jogos de 2026, gerados pelo recortes.py (csvs/todos_picks.csv)."""
@@ -185,8 +165,6 @@ def carregar_todos_picks(con):
                       int(r.team_order), str(r.champion)) for r in b.itertuples()])
     print(f"todos_bans: {b['gameid'].nunique()} jogos, {len(b)} bans")
 
-
-# ---------------------------------------------------------------- main
 
 def main():
     df = ler_csvs()

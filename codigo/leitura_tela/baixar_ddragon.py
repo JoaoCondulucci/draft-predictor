@@ -1,20 +1,8 @@
-"""baixar_ddragon.py — baixa as imagens de referência de todos os campeões (Data Dragon).
-
-    python main.py ddragon
-
-Cria dados/ddragon/ com:
-  campeoes.json      -> id do Data Dragon, nome (igual ao Oracle's Elixir) e versão
-  square/<id>.png    -> ícone quadrado 120x120 (para os BANS)
-  loading/<id>.jpg   -> arte vertical 308x560 (candidata para os PICKS)
-  splash/<id>.jpg    -> arte horizontal 1215x717 (outra candidata para os PICKS)
-
-Ainda não sabemos se a transmissão usa a arte "loading" ou um recorte da "splash"
-nos cards; baixamos as duas e o teste decide. Só usa a biblioteca padrão do Python.
-"""
+"""Baixa do Data Dragon (CDN da Riot) o ícone quadrado e as artes de todos os campeões."""
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import json
 import urllib.request
@@ -37,7 +25,7 @@ def baixar_arquivo(url_destino):
         with urllib.request.urlopen(url, timeout=30) as r:
             destino.write_bytes(r.read())
         return "ok"
-    except Exception as e:  # noqa: BLE001 — queremos seguir com os outros campeões
+    except Exception as e:  # um erro não interrompe os outros downloads
         return f"ERRO {e}"
 
 

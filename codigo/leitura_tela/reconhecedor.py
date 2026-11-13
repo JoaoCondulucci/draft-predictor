@@ -14,25 +14,21 @@ from leitura_tela.layout import LARGURA, regiao_reconhecimento, slots
 
 CACHE_SIFT = DDRAGON / "sift_splash.npz"
 
-# Bans
-BAN_TAM, BAN_TPL = 44, 48     # o ícone de referência é um pouco maior: aceita pequenos deslocamentos
+BAN_TAM, BAN_TPL = 44, 48  # referência maior que o recorte: tolera pequenos deslocamentos
 BAN_MIN, BAN_MARGEM = 0.75, 0.12
 
-# Picks
 SPLASH_W = 800
 SIFT_FEATURES = 800
 PICK_MIN = 12                 # pontos coincidentes mínimos
 PICK_RAZAO = 2.0              # o 1º colocado precisa ter pelo menos 2x os pontos do 2º
 
-# Campeões que dividem a MESMA splash art (Xayah e Rakan aparecem juntos, espelhados).
-# Desempate: onde os pontos coincidem dentro da splash de referência (posição x de 0 a 1).
-# Medido nos frames da semi: card da Xayah ~0.64, card do Rakan ~0.43.
+# Xayah e Rakan dividem a mesma splash (espelhada). O desempate usa a posição x
+# dos pontos coincidentes dentro da splash de referência.
 SPLASH_COMPARTILHADA = {
     frozenset({"Xayah", "Rakan"}): {"referencia": "Xayah", "corte_x": 0.53,
                                     "direita": "Xayah", "esquerda": "Rakan"},
 }
 
-# Timer
 TIMER_Y = 521
 
 
@@ -57,11 +53,10 @@ class Reconhecedor:
                         for sq in p["square"]]
         self.sift = cv2.SIFT_create()
         self.bf = cv2.BFMatcher()
-        self.pick_des = self._carregar_sift()   # lista por campeão: [descritores normal, espelhado]
+        self.pick_des = self._carregar_sift()  # por campeão: [descritores da splash normal, espelhada]
         self._cache = {}                         # slot -> (recorte, excluir, leitura)
-        self._ref_compartilhada = {}             # pontos da splash de referência (Xayah/Rakan)
+        self._ref_compartilhada = {}
 
-    # ------------------------------------------------------------ templates SIFT
 
     def _carregar_sift(self):
         if CACHE_SIFT.exists():
@@ -80,7 +75,7 @@ class Reconhecedor:
             img = cv2.resize(img, (SPLASH_W, int(img.shape[0] * SPLASH_W / img.shape[1])),
                              interpolation=cv2.INTER_AREA)
             cinza = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # Algumas artes aparecem espelhadas na transmissão (ex.: Rakan), então guardamos as duas
+            # Algumas artes aparecem espelhadas na transmissão
             for versao in (cinza, cv2.flip(cinza, 1)):
                 _, des = sift.detectAndCompute(versao, None)
                 des = des if des is not None else np.zeros((0, 128), np.float32)
@@ -91,7 +86,6 @@ class Reconhecedor:
                             des=np.clip(tudo, 0, 255).astype(np.uint8), inicio=np.array(inicio))
         return [[blocos[2 * i], blocos[2 * i + 1]] for i in range(len(self.ids))]
 
-    # ------------------------------------------------------------ utilidades
 
     def _recorte(self, frame, nome_slot, margem):
         x0, y0, x1, y1 = regiao_reconhecimento(nome_slot, self.slots[nome_slot])
@@ -110,7 +104,6 @@ class Reconhecedor:
         ordem = np.argsort(-scores)
         return ordem[0], ordem[1]
 
-    # ------------------------------------------------------------ leitura
 
     def ler_ban(self, frame, nome_slot, excluir=frozenset()):
         recorte = self._recorte(frame, nome_slot, 2)
@@ -207,7 +200,7 @@ class Reconhecedor:
             falha = 0 if colorido[dir_] else falha + 1
         esq, dir_ = esq + 4 if esq > 0 else 0, dir_ - 4 if dir_ < LARGURA - 1 else LARGURA - 1
         if dir_ - esq < 20 or abs((meio - esq) - (dir_ - meio)) > 40:
-            return None, 0.0          # não é simétrico: não é a barra
+            return None, 0.0  # assimétrico: luz do palco, não a barra
         frac = (dir_ - esq) / LARGURA
         trecho = colorido[esq:dir_ + 1]
         hue = float(np.median(linha[esq:dir_ + 1][trecho, 0]))

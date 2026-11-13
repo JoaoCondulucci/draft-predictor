@@ -1,26 +1,14 @@
-"""modelo.py — prevê o próximo pick/ban a partir do draft.db.
+"""Prevê o próximo pick ou ban a partir do draft.db, sem machine learning (poucos jogos por time).
 
-Ideia (simples de propósito, sem machine learning — temos poucos jogos por time):
-
-PICK do time T no passo atual
-    P(campeão) = soma, para cada rota ainda aberta r, de
-                 P(r é a próxima rota | ordem do pick, histórico de T)  x  P(campeão | jogador de T na rota r)
-    O pool do jogador usa peso por recência (jogo de ontem vale mais que jogo de março).
-    Misturado com um pouco do meta do Worlds (o que todo mundo está jogando).
-
-BAN do time T no passo atual
-    mistura de: ameaça (pool dos jogadores do ADVERSÁRIO nas rotas ainda abertas),
-                o que T costuma banir, e o que é mais banido no Worlds.
-
-Campeões já usados no jogo e bloqueados pelo Fearless nunca entram.
-
-Uso rápido:
-    python main.py modelo      # exemplo: primeiro passo de GEN (azul) x BLG (vermelho)
+Pick: soma, em cada rota aberta, de P(rota | nº do pick, time) x P(campeão | jogador da rota),
+      com peso por recência, um pouco do meta, sinergia com os aliados e counter da rota.
+Ban:  ameaça (pool dos adversários nas rotas abertas) + histórico de bans do time + meta.
+Campeões já usados no jogo ou bloqueados pelo Fearless nunca entram.
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import math
 import sqlite3
@@ -34,11 +22,11 @@ MEIA_VIDA_DIAS = 45      # peso de um jogo cai pela metade a cada 45 dias
 SUAVIZACAO = 2.0         # "jogos imaginários" vindos do meta, para campeões fora do pool
 PESO_META_PICK = 0.15
 PESOS_BAN = {"ameaca": 0.5, "historico": 0.25, "meta": 0.25}        # 2ª fase de bans
-PESOS_BAN_FASE1 = {"ameaca": 0.5, "historico": 0.25, "meta": 0.25}  # 1ª fase (mais "meta")
+PESOS_BAN_FASE1 = {"ameaca": 0.5, "historico": 0.25, "meta": 0.25}  # 1ª fase de bans
 LIGA_META = "WLDs"
 
-# Sinergias e counters (tabela todos_picks: todos os jogos de 2026, todas as ligas)
-#   lift = quantas vezes mais o par aparece do que o acaso explicaria (1 = indiferente)
+# Sinergias e counters usam lift: quantas vezes mais o par aparece do que o acaso
+# explicaria (1 = indiferente). Base: todos os jogos de 2026, todas as ligas.
 ALFA_PAR = 5.0           # suavização: pares com poucos jogos ficam perto de 1
 BETA_SINERGIA = 0.5      # força da sinergia com os aliados já escolhidos
 GAMA_COUNTER = 0.5       # força do "costuma ser escolhido contra" o adversário de rota
@@ -72,13 +60,12 @@ class Modelo:
             return 0.5 ** (max((ref - _data(data)).days, 0) / MEIA_VIDA_DIAS)
 
         self.pool = defaultdict(Counter)        # jogador -> campeão -> peso
-        self.jogos_jogador = defaultdict(Counter)  # jogador -> campeão -> nº de jogos (para mostrar)
+        self.jogos_jogador = defaultdict(Counter)
         self.elenco = {}                         # (time, rota) -> jogador mais recente
         self.rota_do_campeao = defaultdict(Counter)  # campeão -> rota -> peso (todas as equipes)
         self.meta_pick = defaultdict(Counter)    # rota -> campeão -> nº picks no Worlds
         ultimo = {}
-        # Pool dos jogadores: de TODOS os jogos de 2026 se a tabela tiver o nome do jogador
-        # (assim adversários de outras ligas também têm o ano inteiro); senão, só player_games.
+        # Pool de todos os jogos de 2026 quando a tabela tem o jogador (cobre adversários de outras ligas)
         colunas = {c[1] for c in con.execute("PRAGMA table_info(todos_picks)")}
         self.usa_todos = "player" in colunas
         if self.usa_todos:
@@ -99,8 +86,8 @@ class Modelo:
                 self.elenco[(time, rota)] = jogador
 
         # Que rota o time costuma garantir no 1º, 2º... pick (padrão do time)
-        self.rota_por_ordem = defaultdict(Counter)   # (time, nº do pick) -> rota -> peso
-        self.bans_time = defaultdict(Counter)        # time -> campeão -> peso
+        self.rota_por_ordem = defaultdict(Counter)
+        self.bans_time = defaultdict(Counter)
         self.meta_ban = Counter()
         self.n_jogos_meta = 0
         for time, tipo, ordem, campeao, data, liga, rota in con.execute(f"""
@@ -119,13 +106,12 @@ class Modelo:
                 self.bans_time[time][campeao] += w
                 if liga == LIGA_META:
                     self.meta_ban[campeao] += 1
-        # Histórico de bans de qualquer time em TODOS os jogos de 2026, separado por fase
-        # (1ª fase = bans 1-3, 2ª fase = bans 4-5: os alvos costumam ser bem diferentes)
-        self.bans_fase = defaultdict(Counter)       # (time, fase) -> campeão -> peso
-        self.n_bans_fase = defaultdict(Counter)     # (time, fase) -> campeão -> nº de bans (para mostrar)
+        # Bans de todas as ligas por fase: 1ª (bans 1-3) e 2ª (bans 4-5) têm alvos diferentes
+        self.bans_fase = defaultdict(Counter)
+        self.n_bans_fase = defaultdict(Counter)
         tabelas = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "todos_bans" in tabelas and USAR_TODOS_BANS:
-            self.bans_time = defaultdict(Counter)   # substitui o histórico só de GEN/BLG/Worlds
+            self.bans_time = defaultdict(Counter)
             for time, ordem, campeao, data in con.execute(
                     f"""SELECT team, team_order, champion, date_utc FROM todos_bans
                         {filtro.replace('g.', '')}""", args):
@@ -134,7 +120,7 @@ class Modelo:
                 self.bans_fase[(time, 1 if ordem <= 3 else 2)][campeao] += w
                 self.n_bans_fase[(time, 1 if ordem <= 3 else 2)][campeao] += 1
 
-        if self.usa_todos:   # ordem de rotas de cada time em TODOS os jogos de 2026
+        if self.usa_todos:
             for time, ordem, rota, data in con.execute(
                     f"""SELECT team, team_order, role, date_utc FROM todos_picks
                         {filtro.replace('g.', '') or 'WHERE 1=1'} AND team_order IS NOT NULL""", args):
@@ -147,20 +133,16 @@ class Modelo:
         con.close()
 
     def _carregar_pares(self, con, filtro, args, ref):
-        """Conta, em todos os jogos de 2026: campeões do mesmo time e duelos de rota.
-
-        Cada jogo pesa pela recência (MEIA_VIDA_PARES): o meta muda, e uma dupla forte
-        em março pode não ser mais jogada no Worlds.
-        """
+        """Conta, em todos os jogos de 2026, duplas do mesmo time, duelos de rota e a ordem das rotas."""
         times = defaultdict(dict)
         peso_jogo = {}
-        ordens = defaultdict(dict)               # (jogo, lado) -> nº do pick -> rota
+        ordens = defaultdict(dict)
         try:
             linhas = con.execute(
                 f"SELECT game_id, side, role, champion, team_order, date_utc FROM todos_picks {filtro}",
                 args).fetchall()
         except sqlite3.OperationalError:
-            linhas = []      # banco antigo, sem a tabela: segue sem sinergias
+            linhas = []
             print("[previsao] draft.db sem a tabela todos_picks: rode: python main.py dados "
                   "para ativar sinergias, counters e padrão de rotas")
         for g, lado, rota, campeao, ordem, data in linhas:
@@ -172,8 +154,8 @@ class Modelo:
                 ordens[(g, lado)][ordem] = rota
 
         # Padrão de rotas: que rota sai no pick n, sabendo quais rotas o time já pegou
-        self.seq_rotas = defaultdict(Counter)    # (rotas já pegas, n) -> rota
-        self.marg_rotas = defaultdict(Counter)   # n -> rota
+        self.seq_rotas = defaultdict(Counter)
+        self.marg_rotas = defaultdict(Counter)
         for seq in ordens.values():
             if len(seq) != 5:
                 continue
@@ -182,9 +164,9 @@ class Modelo:
                 self.seq_rotas[(frozenset(pegas), n)][seq[n]] += 1
                 self.marg_rotas[n][seq[n]] += 1
                 pegas.add(seq[n])
-        self.n_time = Counter()                  # campeão -> nº de times-jogo
-        self.n_par = Counter()                   # (a, b) ordenado -> juntos no mesmo time
-        self.n_rota = defaultdict(Counter)       # rota -> campeão -> nº
+        self.n_time = Counter()
+        self.n_par = Counter()  # (a, b) em ordem alfabética -> jogos juntos no mesmo time
+        self.n_rota = defaultdict(Counter)
         self.n_duelo = Counter()                 # (c, adversário, rota) -> nº
         jogos = defaultdict(dict)
         for (g, lado), rotas in times.items():
@@ -232,7 +214,6 @@ class Modelo:
         melhor = max(lifts, key=lifts.get)
         return self._limitar(fator), (melhor, lifts[melhor])
 
-    # -------------------------------------------------------- peças
 
     def p_meta_rota(self, rota):
         return _normalizar(self.meta_pick[rota])
@@ -265,7 +246,6 @@ class Modelo:
                 livres.remove(melhor)
         return ocupadas, livres
 
-    # -------------------------------------------------------- previsão
 
     def prever(self, time, adversario, tipo, ordem, picks_time, picks_adv, indisponiveis, k=5):
         """Top-k para a próxima ação.

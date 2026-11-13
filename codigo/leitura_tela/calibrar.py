@@ -1,19 +1,12 @@
-"""calibrar.py — marca onde o vídeo está na sua tela e confere os 20 slots.
+"""Marca onde o vídeo está na tela (calibracao.json) e gera uma prévia com os 20 slots.
 
-Uso:
-    python main.py calibrar            # conta 5 s (troque para o vídeo) e tira o print
-    python main.py calibrar 10         # conta 10 s
+    python main.py calibrar            # conta 5 s e tira o print
     python main.py calibrar print.png  # usa um print já salvo
-
-1. Abre o print numa janela: arraste um retângulo EXATAMENTE em cima do vídeo
-   (sem barras pretas, sem a interface do YouTube) e aperte ENTER.
-2. Salva calibracao.json e gera previa_slots.png com os 20 slots desenhados.
-   Abra a prévia e confira se cada retângulo caiu em cima do slot certo.
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # pasta codigo/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # permite importar de codigo/
 
 import json
 import time
@@ -26,12 +19,11 @@ from leitura_tela.layout import ALTURA, LARGURA, TIMER, regiao_reconhecimento, s
 
 ARQ_CALIBRACAO = CALIBRACAO
 ARQ_PREVIA = PREVIA_SLOTS
-MONITOR = 0  # 0 = TODOS os monitores juntos (marque o vídeo em qualquer um deles)
-ESPERA = 5   # segundos de contagem antes do print
+MONITOR = 0  # 0 = todos os monitores juntos
+ESPERA = 5
 
 
 def contagem(segundos):
-    """Dá tempo de trocar para a janela do vídeo antes do print."""
     print(f"Troque para a janela do vídeo. Print em {segundos} s...")
     for s in range(segundos, 0, -1):
         print(f"  {s}...")
@@ -70,8 +62,7 @@ def main():
         contagem(int(arg) if arg else ESPERA)
         tela, mon = capturar_tela()
 
-    # A janela pode ser maior que a tela; reduzimos só para exibir
-    # Reduz só para caber na janela de seleção (com 2 monitores o print fica bem largo)
+    # Reduz o print só para caber na janela de seleção
     escala = min(1.0, 1800 / tela.shape[1], 950 / tela.shape[0])
     exib = cv2.resize(tela, None, fx=escala, fy=escala)
     x, y, w, h = cv2.selectROI("Arraste em cima do VIDEO e aperte ENTER", exib, showCrosshair=False)
