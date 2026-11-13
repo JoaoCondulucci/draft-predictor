@@ -1,0 +1,11 @@
+# Dados gerados ou baixados: cada um gera os seus (ver README)
+dados/
+resultados/
+_antigos/
+.venv/
+__pycache__/
+*.pyc
+
+# Vídeos de teste (gravações da transmissão: pesadas e com direitos da Riot)
+*.mp4
+*.mkv
