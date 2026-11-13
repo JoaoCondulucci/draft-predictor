@@ -3,8 +3,6 @@
 Lê a tela de draft da transmissão de LoL e mostra, por cima do vídeo e ao vivo, os campeões
 mais prováveis para o próximo pick ou ban.
 
-<!-- Arraste aqui o vídeo da ferramenta funcionando (no editor do GitHub ele vira um link) -->
-
 Feito para o Worlds 2026. Projeto de fã, sem relação com a Riot Games.
 
 ## Resultados
@@ -19,6 +17,8 @@ São 650 picks e 650 bans.
 | Picks — só o modelo de contagem | 22,2% | 42,2% | 56,3% |
 | **Bans** — ranking aprendido | 23,4% | 45,1% | **58,2%** |
 | Bans — só o modelo de contagem | 19,8% | 39,8% | 53,4% |
+
+
 
 Para comparar: chutar sempre o campeão mais popular ainda disponível acerta cerca de 23% dos picks
 e 39% dos bans no top 5.
